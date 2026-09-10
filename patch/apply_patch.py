@@ -37,4 +37,20 @@ else:
     print('create_screen model-discovery block not found; existing source may already differ')
 create.write_text(c, encoding='utf-8')
 
+# Modernize the old Android toolchain used by upstream iappyxOS so it can
+# build with current Flutter tooling while retaining the app's legacy KGP.
+android = work / 'src' / 'container_app' / 'android'
+settings_gradle = android / 'settings.gradle'
+sg = settings_gradle.read_text(encoding='utf-8')
+sg = sg.replace('id "com.android.application" version "8.1.1" apply false', 'id "com.android.application" version "8.6.1" apply false')
+sg = sg.replace('id "org.jetbrains.kotlin.android" version "1.8.22" apply false', 'id "org.jetbrains.kotlin.android" version "2.0.21" apply false')
+settings_gradle.write_text(sg, encoding='utf-8')
+
+wrapper = android / 'gradle' / 'wrapper' / 'gradle-wrapper.properties'
+if wrapper.exists():
+    ws = wrapper.read_text(encoding='utf-8')
+    import re
+    ws = re.sub(r'gradle-[0-9.]+-(all|bin)\\.zip', 'gradle-8.7-all.zip', ws)
+    wrapper.write_text(ws, encoding='utf-8')
+
 print('Patch applied successfully')
