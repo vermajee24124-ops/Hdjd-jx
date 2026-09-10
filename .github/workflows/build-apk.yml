@@ -8,62 +8,78 @@ on:
 permissions:
   contents: read
 
-env:
-  FLUTTER_VERSION: stable
-
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout build workspace
+      - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Install Java 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
 
-      - name: Install Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          channel: stable
-          cache: true
-
-      - name: Checkout upstream iappyxOS
-        run: |
-          git clone --depth 1 https://github.com/iappyx/iappyxOS.git build_source
-          python3 patch/apply_patch.py
-
       - name: Configure Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          cmdline-tools-version: 12266719
+          accept-android-sdk-licenses: true
+          packages: platform-tools platforms;android-36 build-tools;36.1.0
 
-      - name: Flutter dependencies
-        working-directory: build_source/src/container_app
-        run: flutter pub get
+      - name: Install Android SDK packages
+        shell: bash
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.1.0"
 
-      - name: Analyze patched app
-        working-directory: build_source/src/container_app
-        run: flutter analyze --no-fatal-infos --no-fatal-warnings
+      - name: Install Godot 4.7.2
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/godot" "$HOME/.local/share/godot/export_templates/4.7.2.stable"
+          curl -L --fail --retry 3 -o "$HOME/godot/godot.zip" \
+            "https://downloads.godotengine.org/?flavor=stable&platform=linux.x86_64&slug=Godot_v4.7.2-stable_linux.x86_64.zip&version=4.7.2"
+          unzip -q "$HOME/godot/godot.zip" -d "$HOME/godot"
+          GODOT_BIN=$(find "$HOME/godot" -maxdepth 2 -type f -name 'Godot_v4.7.2-stable_linux.x86_64' | head -n 1)
+          test -n "$GODOT_BIN"
+          chmod +x "$GODOT_BIN"
+          echo "GODOT_BIN=$GODOT_BIN" >> "$GITHUB_ENV"
+          curl -L --fail --retry 3 -o "$HOME/godot/export_templates.tpz" \
+            "https://downloads.godotengine.org/?flavor=stable&platform=templates&slug=export_templates.tpz&version=4.7.2"
+          unzip -q "$HOME/godot/export_templates.tpz" -d "$HOME/godot/templates_unpack"
+          find "$HOME/godot/templates_unpack" -type f -maxdepth 5 -print
+          TEMPLATE_ROOT=$(find "$HOME/godot/templates_unpack" -type d -path '*/4.7.2.stable' | head -n 1 || true)
+          if [ -n "$TEMPLATE_ROOT" ]; then
+            cp -R "$TEMPLATE_ROOT"/* "$HOME/.local/share/godot/export_templates/4.7.2.stable/"
+          else
+            find "$HOME/godot/templates_unpack" -type f -name 'android_*' -exec cp {} "$HOME/.local/share/godot/export_templates/4.7.2.stable/" \;
+          fi
+          ls -lah "$HOME/.local/share/godot/export_templates/4.7.2.stable/"
 
-      - name: Build universal debug APK
-        working-directory: build_source/src/container_app
-        run: flutter build apk --debug --android-skip-build-dependency-validation
+      - name: Validate Godot project
+        working-directory: godot_project
+        run: |
+          "$GODOT_BIN" --headless --path . --editor --quit
 
-      - name: Rename APK
+      - name: Export universal Android APK
+        working-directory: godot_project
         run: |
           mkdir -p dist
-          cp build_source/src/container_app/build/app/outputs/flutter-apk/app-debug.apk dist/AI_Power_Game_Factory-functional.apk
+          "$GODOT_BIN" --headless --path . --export-debug "Android" dist/AI_Power_Game_Factory.apk
+          test -s dist/AI_Power_Game_Factory.apk
+          ls -lh dist/AI_Power_Game_Factory.apk
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: AI-Power-Game-Factory-functional-APK
-          path: dist/AI_Power_Game_Factory-functional.apk
+          path: godot_project/dist/AI_Power_Game_Factory.apk
           if-no-files-found: error
           retention-days: 30
 
       - name: Build summary
         run: |
-          echo 'Functional APK build completed.' >> "$GITHUB_STEP_SUMMARY"
-          ls -lh dist/AI_Power_Game_Factory-functional.apk >> "$GITHUB_STEP_SUMMARY"
+          echo 'Godot 4.7.2 Android APK build completed.' >> "$GITHUB_STEP_SUMMARY"
+          ls -lh godot_project/dist/AI_Power_Game_Factory.apk >> "$GITHUB_STEP_SUMMARY"
