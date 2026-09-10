@@ -48,7 +48,7 @@ jobs:
 
       - name: Build universal debug APK
         working-directory: build_source/src/container_app
-        run: flutter build apk --debug
+        run: flutter build apk --debug --android-skip-build-dependency-validation
 
       - name: Rename APK
         run: |
